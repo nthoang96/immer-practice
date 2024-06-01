@@ -213,3 +213,116 @@ expect(state).toEqual({
     age: 32 // Reverted
 })
 ```
+
+An easier way to obtain the patches is to use `produceWithPatches`, which has the same signature as `produce`
+
+```js
+import {produceWithPatches} from "immer"
+
+const [nextState, patches, inversePatches] = produceWithPatches(
+    {
+        age: 33
+    },
+    draft => {
+        draft.age++
+    }
+)
+```
+
+### Auto freezing
+Immer automatically freezes any state trees that are modified using `produce`.
+
+`setAutoFreeze(true / false)` can be used to explicitly turn this feature on or off.
+
+### Returning new data from producers
+It is not needed to return anything from a producer, as Immer will return the (finalized) version of the draft anyway. However, it is allowed to just return draft.
+
+```js
+const userReducer = produce((draft, action) => {
+    switch (action.type) {
+        case "renameUser":
+            // OK: we modify the current state
+            draft.users[action.payload.id].name = action.payload.name
+            return draft // same as just 'return'
+        case "loadUsers":
+            // OK: we return an entirely new state
+            return action.payload
+        case "adduser-1":
+            // NOT OK: This doesn't do change the draft nor return a new state!
+            // It doesn't modify the draft (it just redeclares it)
+            // In fact, this just doesn't do anything at all
+            draft = {users: [...draft.users, action.payload]}
+            return
+        case "adduser-2":
+            // NOT OK: modifying draft *and* returning a new state
+            draft.userCount += 1
+            return {users: [...draft.users, action.payload]}
+        case "adduser-3":
+            // OK: returning a new state. But, unnecessary complex and expensive
+            return {
+                userCount: draft.userCount + 1,
+                users: [...draft.users, action.payload]
+            }
+        case "adduser-4":
+            // OK: the immer way
+            draft.userCount += 1
+            draft.users.push(action.payload)
+            return
+    }
+})
+```
+
+### Producing `undefined` using `nothing`
+
+```js
+import {produce, nothing} from "immer"
+
+const state = {
+    hello: "world"
+}
+
+produce(state, draft => {})
+produce(state, draft => undefined)
+// Both return the original state: { hello: "world"}
+
+produce(state, draft => nothing)
+// Produces a new state, 'undefined'
+```
+
+### Inline shortcuts using `void`
+
+```js
+// Single mutation
+produce(draft => void (draft.user.age += 1))
+
+// Multiple mutations
+produce(draft => void ((draft.user.age += 1), (draft.user.height = 186)))
+```
+
+## createDraft / finishDraft
+`createDraft` and `finishDraft` are two low-level functions that are mostly useful for libraries that build abstractions on top of immer. It avoids the need to always create a function in order to work with drafts. Instead, one can create a draft, modify it, and at some time in the future finish the draft, in which case the next immutable state will be produced.
+
+```js
+import {createDraft, finishDraft} from "immer"
+
+const user = {
+    name: "michel",
+    todos: []
+}
+
+const draft = createDraft(user)
+draft.todos = await (await window.fetch("http://host/" + draft.name)).json()
+const loadedUser = finishDraft(draft)
+```
+
+> `finishDraft` takes a `patchListener` as second argument, which can be used to record the patches, similarly to `produce`.
+
+⚠️ in general, we recommend to use produce instead of the createDraft / finishDraft combo, produce is less error prone in usage, and more clearly separates the concepts of mutability and immutability in your code base.
+
+## Performance tips
+### Pre-freeze data
+When adding a large data set to the state tree in an Immer producer (for example data received from a JSON endpoint), it is worth to call freeze(json) on the root of the data that is being added first. To shallowly freeze it. This will allow Immer to add the new data to the tree faster, as it will avoid the need to recursively scan and freeze the new data.
+
+### You can always opt-out
+### For expensive search operations, read from the original state, not the draft
+Immer will convert anything you read in a draft recursively into a draft as well. If you have expensive side effect free operations on a draft that involves a lot of reading, for example finding an index using find(Index) in a very large array, you can speed this up by first doing the search, and only call the produce function once you know the index. *Thereby preventing Immer to turn everything that was searched for in a draft. Or, alternatively, perform the search on the original value of a draft, by using original(someDraft), which boils to the same thing.*
