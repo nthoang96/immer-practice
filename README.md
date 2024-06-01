@@ -326,3 +326,15 @@ When adding a large data set to the state tree in an Immer producer (for example
 ### You can always opt-out
 ### For expensive search operations, read from the original state, not the draft
 Immer will convert anything you read in a draft recursively into a draft as well. If you have expensive side effect free operations on a draft that involves a lot of reading, for example finding an index using find(Index) in a very large array, you can speed this up by first doing the search, and only call the produce function once you know the index. *Thereby preventing Immer to turn everything that was searched for in a draft. Or, alternatively, perform the search on the original value of a draft, by using original(someDraft), which boils to the same thing.*
+
+### Pull produce as far up as possible
+Always try to pull produce 'up',
+```js
+for example for (let x of y) {
+  produce(base, d => d.push(x))
+}
+```
+is exponentially slower than
+```js
+produce(base, d => { for (let x of y) d.push(x)})
+```
